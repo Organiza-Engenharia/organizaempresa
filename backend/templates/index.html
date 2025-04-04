@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="pt" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gerador de Resumo Trabalhista</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#006855">
+  <link rel="icon" href="/static/icon-192.png" type="image/png"/>
+
+  <style>
+    :root {
+      --user-bg: #e0f5ea;
+      --ia-bg: #ffffff;
+      --text-color: #4B5563; /* cinza 2 */
+      --input-bg: #f0f0f0;
+    }
+
+    [data-theme="dark"] {
+      --user-bg: #0f3c2e;
+      --ia-bg: #121212;
+      --text-color: #f5f5f5;
+      --input-bg: #2c2c2c;
+      background-color: #121212;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--ia-bg);
+      color: var(--text-color);
+      font-size: 16px;
+      line-height: 1.75;
+    }
+
+    header {
+      background-color: #006855;
+      color: white;
+      padding: 20px;
+      text-align: center;
+      position: relative;
+    }
+
+    #toggleTheme {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: transparent;
+      border: none;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    #resumos {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+
+      #resumos::-webkit-scrollbar {
+        width: 8px;
+      }
+      #resumos::-webkit-scrollbar-thumb {
+        background-color: #aaa;
+        border-radius: 4px;
+      }
+
+    }
+
+    .mensagem {
+      background-color: var(--ia-bg);
+      color: var(--text-color);
+      padding: 12px 16px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      max-width: 100%;
+      text-align: left;
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+      border: 1px solid #ddd;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      white-space: pre-wrap;
+      box-sizing: border-box;
+    }
+
+    .mensagem.usuario {
+      background-color: var(--user-bg);
+      border: 1px solid #b2dfdb;
+    }
+
+    .ia {
+      background-color: var(--ia-bg);
+      border: 1px solid #ccc;
+    }
+
+    #status, #contadorTokens {
+      text-align: center;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+
+    #limparBtn {
+      background-color: #006855;
+      color: white;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px auto;
+      display: block;
+    }
+
+    #inputArea {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: var(--input-bg);
+      border-top: 1px solid #ccc;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+      gap: 10px;
+      box-sizing: border-box;
+      position: sticky;
+      bottom: 0;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .clip-icon, .send-icon {
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+    }
+
+    .message-input {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 20px;
+      border: none;
+      outline: none;
+      background-color: var(--input-bg);
+      color: var(--text-color);
+    }
+  </style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+>
+<body>
+
+  <header>
+    <h1>Gerador de Resumo Trabalhista</h1>
+    <button id="toggleTheme">🌙</button>
+  </header>
+
+  <div id="status"></div>
+  <div id="contadorTokens">Tokens usados: 0 / 100.000</div>
+
+  <div id="resumos"></div>
+
+  <button id="limparBtn" onclick="limparHistorico()">Limpar Histórico</button>
+
+  <div id="inputArea">
+    <label for="fileInput">
+      <img src="https://cdn-icons-png.flaticon.com/512/60/60525.png" alt="Anexar PDF" class="clip-icon"/>
+    </label>
+    <input type="file" id="fileInput" accept="application/pdf" />
+    <input type="text" class="message-input" id="userInput" placeholder="Envie um PDF..." />
+    <img src="https://cdn-icons-png.flaticon.com/512/2099/2099160.png" alt="Enviar" class="send-icon" onclick="enviarTextoOuPDF()" />
+  </div>
+
+  <script>
+    let historico = JSON.parse(sessionStorage.getItem("chatHistorico")) || [];
+    let totalTokens = parseInt(sessionStorage.getItem("chatTokens")) || 0;
+
+    function countTokens(text) {
+      return Math.ceil(text.length / 4);
+    }
+
+    function atualizarChat() {
+      const container = document.getElementById("resumos");
+      const contador = document.getElementById("contadorTokens");
+      container.innerHTML = "";
+
+      historico.forEach(msg => {
+        const div = document.createElement("div");
+        div.className = "mensagem " + msg.tipo;
+        div.innerText = msg.texto;
+        container.appendChild(div);
+      });
+
+      contador.innerText = `Tokens usados: ${totalTokens.toLocaleString()} / 100.000`;
+    }
+
+    function limparHistorico() {
+      if (confirm("Deseja apagar todo o histórico?")) {
+        sessionStorage.removeItem("chatHistorico");
+        sessionStorage.removeItem("chatTokens");
+        historico = [];
+        totalTokens = 0;
+        atualizarChat();
+      }
+    }
+
+    document.getElementById("userInput").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        enviarTextoOuPDF();
+      }
+    });
+
+    document.getElementById("fileInput").addEventListener("change", async function (event) {
+      const file = event.target.files[0];
+      if (!file || file.type !== "application/pdf") {
+        alert("Por favor, envie apenas arquivos PDF.");
+        return;
+      }
+      await enviarArquivo(file);
+      event.target.value = "";
+    });
+
+    async function enviarArquivo(file) {
+      const status = document.getElementById("status");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      historico.push({ texto: `📎 Enviou: ${file.name}`, tipo: "usuario" });
+      atualizarChat();
+
+      status.innerText = "⏳ Resumindo documento...";
+
+      try {
+        const response = await fetch("/upload", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          const resumoTexto = data.resumo;
+          const tokens = countTokens(resumoTexto);
+
+          if (totalTokens + tokens > 100000) {
+            alert("⚠️ Limite de tokens atingido.");
+            status.innerText = "Limite atingido.";
+            return;
+          }
+
+          historico.push({ texto: resumoTexto, tipo: "ia" });
+          totalTokens += tokens;
+
+          sessionStorage.setItem("chatHistorico", JSON.stringify(historico));
+          sessionStorage.setItem("chatTokens", totalTokens);
+
+          status.innerText = "";
+          atualizarChat();
+        } else {
+          status.innerText = "❌ Erro: " + data.error;
+        }
+      } catch (error) {
+        status.innerText = "❌ Erro ao conectar.";
+      }
+    }
+
+    async function enviarTextoOuPDF() {
+      const input = document.getElementById("userInput");
+      const texto = input.value.trim();
+      const status = document.getElementById("status");
+
+      if (!texto) return;
+
+      historico.push({ texto, tipo: "usuario" });
+      input.value = "";
+      atualizarChat();
+
+      status.innerText = "⏳ Pensando...";
+
+      try {
+        const response = await fetch("/mensagem", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ mensagem: texto })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          const resposta = data.resposta;
+          const tokens = countTokens(resposta);
+
+          if (totalTokens + tokens > 100000) {
+            alert("⚠️ Limite de 100.000 tokens atingido.");
+            status.innerText = "Limite de tokens atingido.";
+            return;
+          }
+
+          // Criar mensagem vazia na tela para a IA
+          const container = document.getElementById("resumos");
+          const div = document.createElement("div");
+          div.className = "mensagem ia";
+          container.appendChild(div);
+          container.scrollTop = container.scrollHeight;
+
+          // Digitação simulada
+          let i = 0;
+          function digitar() {
+            if (i < resposta.length) {
+              div.innerHTML += resposta[i] === '\n' ? '<br>' : resposta[i] === ' ' ? '&nbsp;' : resposta[i];
+              container.scrollTop = container.scrollHeight;
+              i++;
+              setTimeout(digitar, 15); // velocidade da digitação (ms)
+            } else {
+              // Armazenar no histórico depois de digitar tudo
+              historico.push({ texto: resposta, tipo: "ia" });
+              totalTokens += tokens;
+              sessionStorage.setItem("chatHistorico", JSON.stringify(historico));
+              sessionStorage.setItem("chatTokens", totalTokens);
+              status.innerText = "";
+            }
+          }
+          digitar();
+
+        } else {
+          status.innerText = "❌ Erro: " + data.error;
+        }
+
+      } catch (error) {
+        status.innerText = "❌ Erro ao conectar ao servidor.";
+      }
+    }
+
+
+    document.getElementById("toggleTheme").addEventListener("click", () => {
+      const html = document.documentElement;
+      const current = html.getAttribute("data-theme");
+      html.setAttribute("data-theme", current === "dark" ? "light" : "dark");
+      document.getElementById("toggleTheme").textContent = current === "dark" ? "🌙" : "☀️";
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/service-worker.js')
+        .then(() => console.log("✅ Service Worker registrado"))
+        .catch(err => console.error("SW erro:", err));
+    }
+
+    function atualizarChat() {
+      const container = document.getElementById("resumos");
+      const contador = document.getElementById("contadorTokens");
+      container.innerHTML = "";
+
+      historico.forEach(msg => {
+        const div = document.createElement("div");
+        div.className = "mensagem " + msg.tipo;
+        div.innerText = msg.texto;
+        container.appendChild(div);
+      });
+
+      contador.innerText = `Tokens usados: ${totalTokens.toLocaleString()} / 100.000`;
+
+      // ✅ Rola para a última mensagem automaticamente
+      container.scrollTop = container.scrollHeight;
+    }
+
+
+  </script>
+</body>
+</html>

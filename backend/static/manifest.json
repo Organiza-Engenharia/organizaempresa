@@ -1,0 +1,17 @@
+{
+    "name": "Gerador de Resumo de PDF - Organiza Engenharia",
+    "short_name": "ResumoPDF",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#006855",
+    "orientation": "portrait",
+    "icons": [
+      {
+        "src": "icon-192.png",
+        "sizes": "192x192",
+        "type": "image/png"
+      }
+    ]
+  }
+  
