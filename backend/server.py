@@ -102,6 +102,8 @@ def summarize_text(text):
         return f"Erro ao gerar resumo: {str(e)}"
 
 def create_pdf(summary, output_path, title="Resumo Documento"):
+    summary_html = summary.replace('\n', '<br>')  # ✅ importante
+
     html = f"""
     <html>
     <head><meta charset="UTF-8"><title>{title}</title>
@@ -113,7 +115,7 @@ def create_pdf(summary, output_path, title="Resumo Documento"):
     </head>
     <body>
         <h1>{title}</h1>
-        <div class="content">{summary.replace('\n', '<br>')}</div>
+        <div class="content">{summary_html}</div>
     </body>
     </html>
     """
@@ -128,13 +130,10 @@ def create_pdf(summary, output_path, title="Resumo Documento"):
                 'margin-top': '10mm',
                 'margin-bottom': '10mm'
             }
-            # ⚠️ Comentado pois wkhtmltopdf não está disponível no Render
-            # , configuration=pdfkit.configuration(
-            #     wkhtmltopdf="/usr/bin/wkhtmltopdf"
-            # )
         )
     except Exception as e:
         logger.warning(f"PDF não gerado (ignorado no ambiente Render): {e}")
+
 
 # =============================================
 # ROTAS FLASK
