@@ -1,41 +1,28 @@
 import time  
 from flask import Flask, request, jsonify, send_file, render_template
 import os
-import fitz  # PyMuPDF para leitura de PDFs
-import pdfkit  # Para gerar PDF
-import requests  # Para chamar a API da DeepSeek
+import fitz  # PyMuPDF
+import pdfkit
+import requests
 import pytesseract
-from PIL import Image, ImageEnhance  # Manipular imagens extraídas do PDF
-import io  # Para manipular os bytes da imagem extraída
+from PIL import Image, ImageEnhance
+import io
 import logging
 
 # =============================================
-# CONFIGURAÇÕES ESSENCIAIS (VERIFIQUE OS CAMINHOS!)
+# CONFIGURAÇÕES DE LOGGING E FLASK
 # =============================================
-TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR"
-os.environ["TESSDATA_PREFIX"] = os.path.join(TESSERACT_PATH, "tessdata")
-pytesseract.pytesseract.tesseract_cmd = os.path.join(TESSERACT_PATH, "tesseract.exe")
-
-# Verificação de instalação do Tesseract
-if not os.path.exists(pytesseract.pytesseract.tesseract_cmd):
-    raise RuntimeError("Tesseract não encontrado no caminho especificado!")
-if not os.path.exists(os.environ["TESSDATA_PREFIX"]):
-    raise RuntimeError(f"Pasta tessdata não encontrada em: {os.environ['TESSDATA_PREFIX']}")
-
-# Configuração de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
-
 # =============================================
 # FUNÇÕES AUXILIARES
 # =============================================
 def enhance_image(img):
-    """Melhora a qualidade da imagem para OCR"""
     try:
-        img = img.convert('L')  # Escala de cinza
+        img = img.convert('L')
         enhancer = ImageEnhance.Contrast(img)
         img = enhancer.enhance(2.0)
         enhancer = ImageEnhance.Sharpness(img)
@@ -49,47 +36,45 @@ def extract_text_from_pdf(pdf_path):
     try:
         with fitz.open(pdf_path) as doc:
             for page_num, page in enumerate(doc, 1):
-                # Extração direta
                 extracted_text = page.get_text("text")
                 if extracted_text.strip():
                     logger.info(f"Página {page_num}: Texto extraído ({len(extracted_text)} caracteres)")
                     text += extracted_text + "\n"
                     continue
-                
-                # Fallback para OCR
-                logger.info(f"Página {page_num}: Iniciando OCR...")
-                try:
-                    pix = page.get_pixmap(dpi=300)
-                    img = Image.open(io.BytesIO(pix.tobytes("png")))
-                    img = enhance_image(img)
-                    
-                    ocr_text = pytesseract.image_to_string(
-                        img,
-                        lang="por+eng",
-                        config='--psm 6 --oem 3'
-                    )
-                    
-                    if ocr_text.strip():
-                        logger.info(f"OCR Página {page_num} extraiu: {ocr_text[:50]}...")  # Mostra início do texto
-                        text += ocr_text + "\n"
-                    else:
-                        logger.warning(f"OCR Página {page_num} não retornou texto")
-                        
-                except Exception as ocr_error:
-                    logger.error(f"Erro no OCR (Página {page_num}): {str(ocr_error)}")
-                    raise
+
+                # OCR apenas se Tesseract estiver disponível
+                if hasattr(pytesseract, "image_to_string"):
+                    logger.info(f"Página {page_num}: Iniciando OCR...")
+                    try:
+                        pix = page.get_pixmap(dpi=300)
+                        img = Image.open(io.BytesIO(pix.tobytes("png")))
+                        img = enhance_image(img)
+
+                        ocr_text = pytesseract.image_to_string(
+                            img,
+                            lang="por+eng",
+                            config='--psm 6 --oem 3'
+                        )
+                        if ocr_text.strip():
+                            logger.info(f"OCR Página {page_num} extraiu: {ocr_text[:50]}...")
+                            text += ocr_text + "\n"
+                        else:
+                            logger.warning(f"OCR Página {page_num} não retornou texto")
+                    except Exception as ocr_error:
+                        logger.warning(f"OCR não disponível: {ocr_error}")
+                else:
+                    logger.warning("OCR ignorado (Tesseract não disponível no ambiente)")
 
     except Exception as e:
         logger.error(f"Erro ao processar PDF: {str(e)}")
         raise
 
-    logger.info(f"Texto total extraído: {len(text)} caracteres")  # Confirmação final
+    logger.info(f"Texto total extraído: {len(text)} caracteres")
     return text.strip()
 
 def summarize_text(text):
-    """Gera resumo usando API DeepSeek"""
     DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-c09b614705c14f968ae5e8b75c8e7ef4")
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -117,7 +102,6 @@ def summarize_text(text):
         return f"Erro ao gerar resumo: {str(e)}"
 
 def create_pdf(summary, output_path, title="Resumo Documento"):
-    """Gera PDF formatado"""
     html = f"""
     <html>
     <head><meta charset="UTF-8"><title>{title}</title>
@@ -133,7 +117,7 @@ def create_pdf(summary, output_path, title="Resumo Documento"):
     </body>
     </html>
     """
-    
+
     try:
         pdfkit.from_string(
             html,
@@ -143,17 +127,17 @@ def create_pdf(summary, output_path, title="Resumo Documento"):
                 'encoding': 'UTF-8',
                 'margin-top': '10mm',
                 'margin-bottom': '10mm'
-            },
-            configuration=pdfkit.configuration(
-                wkhtmltopdf=r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
-            )
+            }
+            # ⚠️ Comentado pois wkhtmltopdf não está disponível no Render
+            # , configuration=pdfkit.configuration(
+            #     wkhtmltopdf="/usr/bin/wkhtmltopdf"
+            # )
         )
     except Exception as e:
-        logger.error(f"Erro ao gerar PDF: {e}")
-        raise
+        logger.warning(f"PDF não gerado (ignorado no ambiente Render): {e}")
 
 # =============================================
-# ROTAS PRINCIPAIS
+# ROTAS FLASK
 # =============================================
 @app.route("/")
 def home():
@@ -164,21 +148,19 @@ def upload_pdf():
     try:
         if 'file' not in request.files:
             return jsonify({"error": "Nenhum arquivo enviado"}), 400
-            
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({"error": "Nome de arquivo inválido"}), 400
 
         temp_path = "temp.pdf"
         file.save(temp_path)
-        
+
         text = extract_text_from_pdf(temp_path)
         if not text.strip():
             return jsonify({"error": "Não foi possível extrair texto"}), 400
-            
-        summary = summarize_text(text)
 
-        # Retorna diretamente o resumo no JSON
+        summary = summarize_text(text)
         return jsonify({
             "success": True,
             "resumo": summary
@@ -188,19 +170,8 @@ def upload_pdf():
         logger.error(f"Erro no upload: {e}")
         return jsonify({"error": str(e)}), 500
     finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
-@app.route("/download/<filename>")
-def download_file(filename):
-    try:
-        file_path = os.path.join(os.getcwd(), filename)
-        if os.path.exists(file_path):
-            return send_file(file_path, as_attachment=True)
-        return jsonify({"error": "Arquivo não encontrado"}), 404
-    except Exception as e:
-        logger.error(f"Erro no download: {e}")
-        return jsonify({"error": str(e)}), 500
+        if os.path.exists("temp.pdf"):
+            os.remove("temp.pdf")
 
 @app.route("/mensagem", methods=["POST"])
 def processar_mensagem():
@@ -212,7 +183,7 @@ def processar_mensagem():
             return jsonify({"error": "Mensagem vazia"}), 400
 
         DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-        DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-c09b614705c14f968ae5e8b75c8e7ef4")
+        DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -241,18 +212,8 @@ def processar_mensagem():
         logger.error(f"Erro ao processar mensagem: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-
 # =============================================
 # INICIALIZAÇÃO
 # =============================================
 if __name__ == "__main__":
-    # Verificação final do Tesseract
-    try:
-        test_img = Image.new('RGB', (100, 100), color='white')
-        pytesseract.image_to_string(test_img, lang='por+eng')
-        logger.info("✅ Tesseract configurado corretamente")
-    except Exception as e:
-        logger.error(f"❌ Falha na verificação do Tesseract: {e}")
-
     app.run(debug=True, host="0.0.0.0", port=5000)
